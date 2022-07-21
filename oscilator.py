@@ -1,9 +1,12 @@
+from turtle import width
 import deepxde as dde
 import numpy as np
 import matplotlib.pyplot as plt
-import imageio
-import os, shutil
+import threading
 import tkinter as tk
+import customtkinter as ctk
+from PIL import Image, ImageTk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 # Diferencijalna jednacina i njeni parametri
 # m * u'' + Mi * u' + ku = 0
@@ -52,6 +55,16 @@ class PINN:
         self.interval = dde.geometry.TimeDomain(0, duration)     # Resava se na domenu t=(0,duration)
         self.delta = Mi / 2*mass
         self.w0 = np.sqrt(k / mass)
+        
+    # Pomocna funkcija za spajanje nisa x i y podataka
+    # Koristi se kod iscrtavanja grafika
+    def PackData(self, x, y):
+        data = []
+
+        for i in range(len(x)):
+            data += [(x[i][0], y[i][0])]
+            
+        return data
 
     # Funkcija za treniranje i predvidjanje
     # Prima neophodne parametre za podesavanje i treniranje mreze koje korisnik moze da podesava odvojeno od ulaznih parametara
@@ -60,8 +73,8 @@ class PINN:
         def func(t):
             #print("sssssssssssss ", delta, w0)
             
-            #delta = Mi / 2*mass
-            #w0 = np.sqrt(k / mass)
+            # delta = Mi / 2*mass - NIJE DEO KODA
+            # w0 = np.sqrt(k / mass) - NIJE DEO KODA
             # Postoje 3 slucaja za dobijanje egzaktnog resenja koji potencijalno sadrze svoje podslucajeve:
             
             
@@ -135,7 +148,7 @@ class PINN:
         
         bestRMSE = float("inf")
         
-        for i in range(5):
+        for i in range(1):
             # Trening podaci
             data = dde.data.TimePDE(self.interval, Ode, [ic1, ic2], numDomain, numBoundary, solution=func, num_test=numTest)
 
@@ -161,87 +174,241 @@ class PINN:
 
 class GUI:
     def __init__(self):
-        pass
+        ctk.set_appearance_mode("dark")  # Modes: system (default), light, dark
+        ctk.set_default_color_theme("blue")  # Themes: blue (default), dark-blue, green
+
+        self.app = ctk.CTk()  # create CTk window like you do with the Tk window
+        self.app.geometry("1100x720")
+        
+        self.mass = tk.StringVar()
+        self.mi = tk.StringVar()
+        self.k = tk.StringVar()
+        self.position = tk.StringVar()
+        self.velocity = tk.StringVar()
+        self.domain = tk.StringVar()
+        self.bounds = tk.StringVar()
+        self.tests = tk.StringVar()
+        self.epochs = tk.StringVar()
+        
+        self.frameSettings = ctk.CTkFrame(self.app, height=700)
+        self.frameSimulation = ctk.CTkFrame(self.app, width=400, height=700)
+        self.frameGraph = ctk.CTkFrame(self.app, width=440, height=700)
+        self.frameTrainingSettings = ctk.CTkFrame(self.app, height=700)
+        
+    def DrawGraph(self, data):
+        figure1 = plt.Figure(figsize=(6,5), dpi=100)
+        ax1 = figure1.add_subplot(111)
+        plot = FigureCanvasTkAgg(figure1, self.frameGraph)
+        plot.get_tk_widget().grid(row=1, column=0, rowspan=14)
+        ax1.plot([x[0] for x in data], [x[1] for x in data])
+        ax1.set_title('Prediction')
+        ax1.set_xlabel("Seconds")
+        ax1.set_ylabel("Distance")
+        
+    def DrawSimulation(self, data=[(0,0)]):
+        canvas = ctk.CTkCanvas(self.frameSimulation, width=400, height=600,bg="white")
+        canvas.place(x=0, y=80)
+        
+        # -- STATIC OBJECTS --
+        canvas.create_line(0,200,400,200, dash=(10,1))      # zero line
+        
+        for x in range(0,400,10):       # anchor suface 1
+            canvas.create_line(x,50,x+8,35)
+        canvas.create_line(0,50,400,50,width=3)         # anchor surface 2
+        
+        temp = -2
+        canvas.create_line(10,50,10,600, width=2)       # height line 1
+        for x in range(100,600,50):      # height line 2
+            canvas.create_line(10,x,20,x)
+            canvas.create_text(25, x, text=temp)
+            temp += 1
+        
+        
+        # -- MOVING OBJECTS -- 
+        massHeightPos = 200 - 50 * data[0][1]
+        massBlock = canvas.create_polygon(150,massHeightPos,250,massHeightPos, 250,massHeightPos+100,150,massHeightPos+100)     # mass block 
+        spring = canvas.create_line(200,50,200,massHeightPos)        # spring
+        
+        for x in data:
+            canvas.delete(massBlock)
+            canvas.delete(spring)
+            
+            massHeightPos = 200 - 50 * x[1]
+            massBlock = canvas.create_polygon(150,massHeightPos,250,massHeightPos, 250,massHeightPos+100,150,massHeightPos+100)     # mass block
+            
+            spring = canvas.create_line(200,50,200,massHeightPos)        # spring
+            
+            canvas.after(5)
+        
+        
+    def StartSimulationThread(self, button):
+        
+        pinn = PINN(float(self.mass.get()), float(self.mi.get()), float(self.k.get()), float(self.position.get()), float(self.velocity.get()))
+        losshistory, train_state = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()),  [1] + [30] * 2 + [1], int(self.epochs.get()))
+        #dde.saveplot(losshistory, train_state, issave=True, isplot=True)
+        
+        pred = pinn.PackData(train_state.X_test, train_state.best_y)
+        pred = sorted(pred, key=lambda x: x[0])
+
+        self.DrawGraph(pred)
+        
+        self.DrawSimulation(pred)
+        
+        button.configure(state=tk.NORMAL)
+        
+    def StartSimulation(self, button):
+        button.configure(state=tk.DISABLED)
+        thread = threading.Thread(target=self.StartSimulationThread, args=(button,))
+        thread.start()
+        
+        #button.configure(state=tk.NORMAL)
     
     def TkMain(self):
-        mainWindow = tk.Tk()
-        mainWindow.geometry("800x600")
         
-        frameSettings = tk.Frame(master=mainWindow).grid(row=0,column=0)
-        frameSimulation = tk.Frame()
-        frameGraph = tk.Frame()
+        def CheckIfNumber(char):
+            if(char != ""):
+                try:
+                    float(char)
+                except:
+                    return False
+
+            return True
         
-        l_mass = tk.Label(master=frameSettings, text="Mass", width=150, height=35)
-        l_mi = tk.Label(master=frameSettings, text="Friction", width=150, height=35)
-        l_k = tk.Label(master=frameSettings, text="Spring", width=150, height=35)
+        def CheckIfPositiveNumber(char):
+            if(char != ""):
+                try:
+                    if(float(char) <= 0):
+                        return False
+                except:
+                    return False
+
+            return True
         
-        in_mass = tk.Entry(master=frameSettings, width=150)
-        in_mi = tk.Entry(master=frameSettings, width=150)
-        in_k = tk.Entry(master=frameSettings, width=150)
+        def HideSettings():
+            self.frameTrainingSettings.tkraise()
+            
+        def ShowSettings():
+            self.frameSettings.tkraise()
         
-        btn_begin = tk.Button(master=frameSettings, text="Begin simulation")
+        self.DrawSimulation()
         
-        #l_mass.place(x=20,y=50)
-        #in_mass.place(x=20, y=90)
-        l_mass.grid(row=0, column=0)
-        in_mass.grid(row=1, column=0)
-        l_mi.grid(row=3, column=0)
-        in_mi.grid(row=4, column=0)
+        # -- FRAME SETTINGS --
+        
+        self.frameSettings.columnconfigure((0), weight=1)
+        self.frameSettings.rowconfigure(([x for x in range(15)]), weight=1)
+        self.frameSettings.grid(row=0,column=0, sticky=tk.NS, padx=10, pady=10)
+        self.frameSettings.grid_propagate(0)
+        
+        self.frameSimulation.columnconfigure((0), weight=1)
+        self.frameSimulation.rowconfigure(([x for x in range(15)]), weight=1)
+        self.frameSimulation.grid(row=0,column=1, sticky=tk.NS, padx=10, pady=10)
+        self.frameSimulation.grid_propagate(0)
+        
+        self.frameGraph.columnconfigure((0), weight=1)
+        self.frameGraph.rowconfigure(([x for x in range(15)]), weight=1)
+        self.frameGraph.grid(row=0,column=2, sticky=tk.NS, padx=10, pady=10)
+        self.frameGraph.grid_propagate(0)
+        
+        self.frameTrainingSettings.columnconfigure((0), weight=1)
+        self.frameTrainingSettings.rowconfigure(([x for x in range(15)]), weight=1)
+        self.frameTrainingSettings.grid(row=0,column=0, sticky=tk.NS, padx=10, pady=10)
+        self.frameTrainingSettings.grid_propagate(0)
+        
+        self.frameSettings.tkraise()
+        
+        # -- WIDGETS -- 
+        
+        image = Image.open("Resources\SettingsButtonImg.png").resize((15,15), Image.ANTIALIAS)
+        SettingsPhoto = ImageTk.PhotoImage(image)
+        
+        l_mass = ctk.CTkLabel(master=self.frameSettings, text="Mass", width=150, height=35)
+        l_mi = ctk.CTkLabel(master=self.frameSettings, text="Friction", width=150, height=35)
+        l_k = ctk.CTkLabel(master=self.frameSettings, text="Spring", width=150, height=35)
+        l_position = ctk.CTkLabel(master=self.frameSettings, text="Starting position", width=150, height=35)
+        l_velocity = ctk.CTkLabel(master=self.frameSettings, text="Starting velocity", width=150, height=35)
+        l_titleSettings = ctk.CTkLabel(master=self.frameSettings, text="SETTINGS", width=150, height=35)
+        l_titleSimulation = ctk.CTkLabel(master=self.frameSimulation, text="SIMULATION", width=150, height=35)
+        l_titleGraph = ctk.CTkLabel(self.frameGraph, text="GRAPH", width=150, height=35)
+        
+        l_numDomain = ctk.CTkLabel(self.frameTrainingSettings, text="Domain points", width=150, height=35)
+        l_numBounds = ctk.CTkLabel(self.frameTrainingSettings, text="Boundary points", width=150, height=35)
+        l_numTest = ctk.CTkLabel(self.frameTrainingSettings, text="Number of tests", width=150, height=35)
+        l_numEpochs = ctk.CTkLabel(self.frameTrainingSettings, text="Number of epochs", width=150, height=35)
+        
+        numValidator = self.app.register(CheckIfNumber)
+        positiveNumValidator = self.app.register(CheckIfPositiveNumber)
+        
+        in_mass = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mass, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        in_mi = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mi, validate="key", validatecommand=(numValidator, "%P"))
+        in_k = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.k, validate="key", validatecommand=(numValidator, "%P"))
+        in_position = ctk.CTkEntry(master=self.frameSettings, textvariable=self.position, width=150, validate="key", validatecommand=(numValidator, "%P"))
+        in_velocity = ctk.CTkEntry(master=self.frameSettings, textvariable=self.velocity, width=150, validate="key", validatecommand=(numValidator, "%P"))
+        
+        in_numDomain = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.domain, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        in_numBounds = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.bounds, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        in_numTest = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.tests, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        in_numEpochs = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.epochs, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        
+        in_numDomain.insert(tk.END, "100")
+        in_numBounds.insert(tk.END, "20")
+        in_numTest.insert(tk.END, "200")
+        in_numEpochs.insert(tk.END, "5000")
+        
+        btn_begin = ctk.CTkButton(master=self.frameSettings, text="Start")
+        btn_begin.configure(command=lambda x=btn_begin:self.StartSimulation(x))
+        btn_swapSettings = ctk.CTkButton(master=self.frameTrainingSettings,text="", image=SettingsPhoto, command=ShowSettings, width=15, height=15).place(x=10,y=10)
+        btn_swapTrainSettings = ctk.CTkButton(master=self.frameSettings,text="", image=SettingsPhoto, command=HideSettings, width=15, height=15).place(x=10,y=10)
+        
+        
+        # -- PLACEMENT -- 
+        
+            # -- FrameSettings
+        
+        l_titleSettings.grid(row=0, column=0)
+        
+        l_mass.grid(row=2, column=0)
+        in_mass.grid(row=3, column=0)
+        
+        l_mi.grid(row=4, column=0)
+        in_mi.grid(row=5, column=0)
+        
         l_k.grid(row=6, column=0)
         in_k.grid(row=7, column=0)
         
-        mainWindow.mainloop()
+        l_position.grid(row=8, column=0)
+        in_position.grid(row=9, column=0)
 
-# Pomocna funkcija za spajanje nisa x i y podataka
-# Koristi se kod iscrtavanja grafika
-def PackData(x, y):
-    data = []
-
-    for i in range(len(x)):
-        data += [(x[i][0], y[i][0])]
+        l_velocity.grid(row=10, column=0)
+        in_velocity.grid(row=11, column=0)
         
-    return data
+        btn_begin.grid(row=13, column=0)
+ 
+            # -- FrameTrainSettings -- 
+ 
+        l_numDomain.grid(row=2, column=0)
+        in_numDomain.grid(row=3, column=0)
+        
+        l_numBounds.grid(row=4, column=0)
+        in_numBounds.grid(row=5, column=0)
+        
+        l_numTest.grid(row=6, column=0)
+        in_numTest.grid(row=7, column=0)
+        
+        l_numEpochs.grid(row=8, column=0)
+        in_numEpochs.grid(row=9, column=0)
+        
+            # -- FrameSimulation --
+        
+        l_titleSimulation.grid(row=0, column=0)
+        
+            # -- FrameGraph --
+        
+        l_titleGraph.grid(row=0, column=0)
+        
+        self.app.mainloop()
 
 
 # ======= MAIN ==============
 if __name__ == "__main__":
-    print("Mass")
-    mass = float(input())
-    print("Friction")
-    Mi = float(input())
-    print("Spring")
-    k = float(input())
-    print("Starting position")
-    x0 = float(input())  # Starting position
-    print("Starting velocity")
-    v0 = float(input())  # Starting velocity
-    
-    pinn = PINN(mass, Mi, k, x0, v0)
-    losshistory, train_state = pinn.TrainModel(100, 20, 200,  [1] + [30] * 2 + [1], 5000)
-    dde.saveplot(losshistory, train_state, issave=True, isplot=True)
-    
-    # train = PackData(train_state.X_train, train_state.y_train)
-    # train = sorted(train, key=lambda x: x[0])
-
-    # test = PackData(train_state.X_test, train_state.y_test)
-    # test = sorted(test, key=lambda x: x[0])
-
-    # pred = PackData(train_state.X_test, train_state.best_y)
-    # pred = sorted(pred, key=lambda x: x[0])
-
-    # shutil.rmtree("images")
-    # os.mkdir("images")
-
-    # plt.xlim((-1,duration+1))
-    
-    # plt.plot([x[0] for x in test], [x[1] for x in test], color="blue")
-    # plt.show()
-
-    # # for i in range(len(test)):
-    # #     plt.plot(pred[i][0], pred[i][1], color="red", linestyle="dashed", linewidth=2, marker=".")
-    # #     plt.legend(["actual", "predicted"])
-    # #     plt.savefig(f"images/{i}.png")
-    # #     print(f"Progress: {int((i / len(test)) * 100)}%")
-    
-    #gui = GUI()
-    #gui.TkMain()
+    gui = GUI()
+    gui.TkMain()
