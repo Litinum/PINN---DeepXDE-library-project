@@ -2,11 +2,12 @@ from turtle import width
 import deepxde as dde
 import numpy as np
 import matplotlib.pyplot as plt
-import threading
+import threading, os
 import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+
 
 # Diferencijalna jednacina i njeni parametri
 # m * u'' + Mi * u' + ku = 0
@@ -16,7 +17,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 # x0 - Starting position 
 # v0 - Starting velocity (positive is up)
 
-duration = 10       # Duzina trajanja simulacije oscilovanja. POTENCIJALNI ULAZNI PARAMETAR
+#duration = 10       # Duzina trajanja simulacije oscilovanja. POTENCIJALNI ULAZNI PARAMETAR
 
 
 # Testni slucajevi
@@ -46,7 +47,7 @@ duration = 10       # Duzina trajanja simulacije oscilovanja. POTENCIJALNI ULAZN
 
 class PINN: 
     # Prima ulazne parametre
-    def __init__(self, mass, Mi, k, x0 ,v0):
+    def __init__(self, mass, Mi, k, x0 ,v0, duration):
         self.mass = mass        # Object mass
         self.Mi = Mi        # Friction coef
         self.k = k      # Spring coef
@@ -93,7 +94,7 @@ class PINN:
             # CRITICALLY DAMPED CASE
             # Ovaj slucaj je najjednostavniji od svih
             elif(self.delta == self.w0):
-                return np.exp(-self.delta*t) * (self.x0 + (self.v0 + self.delta*x0) * t)
+                return np.exp(-self.delta*t) * (self.x0 + (self.v0 + self.delta*self.x0) * t)
 
             # UNDERDAMBED CASE
             # Najcesci slucaj gde se najbolje i prikazuje oscilovanje
@@ -160,6 +161,11 @@ class PINN:
             
             rmse = np.sqrt(np.sum((train_state.y_test - train_state.best_y)**2))
             
+            if(i == 0):
+                bestRMSE = rmse
+                bestTrain = train_state
+                bestHist = losshistory
+                
             if(rmse < bestRMSE):
                 bestRMSE = rmse
                 bestTrain = train_state
@@ -189,6 +195,9 @@ class GUI:
         self.bounds = tk.StringVar()
         self.tests = tk.StringVar()
         self.epochs = tk.StringVar()
+        self.time = tk.StringVar()
+        
+        self.latestPred = [(0,0)]
         
         self.frameSettings = ctk.CTkFrame(self.app, height=700)
         self.frameSimulation = ctk.CTkFrame(self.app, width=400, height=700)
@@ -196,17 +205,18 @@ class GUI:
         self.frameTrainingSettings = ctk.CTkFrame(self.app, height=700)
         
     def DrawGraph(self, data):
-        figure1 = plt.Figure(figsize=(6,5), dpi=100)
+        figure1 = plt.Figure(figsize=(9,5), dpi=90)
         ax1 = figure1.add_subplot(111)
         plot = FigureCanvasTkAgg(figure1, self.frameGraph)
         plot.get_tk_widget().grid(row=1, column=0, rowspan=14)
         ax1.plot([x[0] for x in data], [x[1] for x in data])
         ax1.set_title('Prediction')
-        ax1.set_xlabel("Seconds")
-        ax1.set_ylabel("Distance")
+        ax1.set_xlabel("Time [s]")
+        ax1.set_ylabel("Distance [cm]")
         
-    def DrawSimulation(self, data=[(0,0)]):
-        canvas = ctk.CTkCanvas(self.frameSimulation, width=400, height=600,bg="white")
+    def DrawSimulation(self, playButton, data=[(0,0)]):
+        playButton.configure(state=tk.DISABLED)
+        canvas = ctk.CTkCanvas(self.frameSimulation, width=400, height=580,bg="white")
         canvas.place(x=0, y=80)
         
         # -- STATIC OBJECTS --
@@ -240,10 +250,11 @@ class GUI:
             
             canvas.after(5)
         
+        playButton.configure(state=tk.NORMAL)
         
-    def StartSimulationThread(self, button):
+    def StartTrainingThread(self, startButton, playButton):
         
-        pinn = PINN(float(self.mass.get()), float(self.mi.get()), float(self.k.get()), float(self.position.get()), float(self.velocity.get()))
+        pinn = PINN(float(self.mass.get()), float(self.mi.get()), float(self.k.get()), float(self.position.get()), float(self.velocity.get()), float(self.time.get()))
         losshistory, train_state = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()),  [1] + [30] * 2 + [1], int(self.epochs.get()))
         #dde.saveplot(losshistory, train_state, issave=True, isplot=True)
         
@@ -252,13 +263,18 @@ class GUI:
 
         self.DrawGraph(pred)
         
-        self.DrawSimulation(pred)
+        self.latestPred = pred
+        self.DrawSimulation(playButton, pred)
         
-        button.configure(state=tk.NORMAL)
+        startButton.configure(state=tk.NORMAL)
         
-    def StartSimulation(self, button):
-        button.configure(state=tk.DISABLED)
-        thread = threading.Thread(target=self.StartSimulationThread, args=(button,))
+    def ReplaySimulationThread(self, playButton, data):
+        thread = threading.Thread(target=self.DrawSimulation, args=(playButton, data,))
+        thread.start()
+        
+    def StartSimulation(self, startButton, playButton):
+        startButton.configure(state=tk.DISABLED)
+        thread = threading.Thread(target=self.StartTrainingThread, args=(startButton, playButton,))
         thread.start()
         
         #button.configure(state=tk.NORMAL)
@@ -290,8 +306,6 @@ class GUI:
         def ShowSettings():
             self.frameSettings.tkraise()
         
-        self.DrawSimulation()
-        
         # -- FRAME SETTINGS --
         
         self.frameSettings.columnconfigure((0), weight=1)
@@ -318,47 +332,61 @@ class GUI:
         
         # -- WIDGETS -- 
         
-        image = Image.open("Resources\SettingsButtonImg.png").resize((15,15), Image.ANTIALIAS)
+        imagePath = os.path.join("Resources", "SettingsButtonImg.png")
+        image = Image.open(imagePath).resize((15,15), Image.ANTIALIAS)
         SettingsPhoto = ImageTk.PhotoImage(image)
+        
+        imagePath = os.path.join("Resources", "resetButtonImg.png")
+        image = Image.open(imagePath).resize((15,15), Image.ANTIALIAS)
+        ResetPhoto = ImageTk.PhotoImage(image)
         
         l_mass = ctk.CTkLabel(master=self.frameSettings, text="Mass", width=150, height=35)
         l_mi = ctk.CTkLabel(master=self.frameSettings, text="Friction", width=150, height=35)
         l_k = ctk.CTkLabel(master=self.frameSettings, text="Spring", width=150, height=35)
         l_position = ctk.CTkLabel(master=self.frameSettings, text="Starting position", width=150, height=35)
         l_velocity = ctk.CTkLabel(master=self.frameSettings, text="Starting velocity", width=150, height=35)
-        l_titleSettings = ctk.CTkLabel(master=self.frameSettings, text="SETTINGS", width=150, height=35)
+        l_titleSettings = ctk.CTkLabel(master=self.frameSettings, text="PHYSICAL PARAMETERS", width=150, height=35)
         l_titleSimulation = ctk.CTkLabel(master=self.frameSimulation, text="SIMULATION", width=150, height=35)
         l_titleGraph = ctk.CTkLabel(self.frameGraph, text="GRAPH", width=150, height=35)
+        l_titleModelSettings = ctk.CTkLabel(master=self.frameTrainingSettings, text="PINN PARAMETERS", width=150, height=35)
         
         l_numDomain = ctk.CTkLabel(self.frameTrainingSettings, text="Domain points", width=150, height=35)
         l_numBounds = ctk.CTkLabel(self.frameTrainingSettings, text="Boundary points", width=150, height=35)
         l_numTest = ctk.CTkLabel(self.frameTrainingSettings, text="Number of tests", width=150, height=35)
         l_numEpochs = ctk.CTkLabel(self.frameTrainingSettings, text="Number of epochs", width=150, height=35)
+        l_time = ctk.CTkLabel(self.frameTrainingSettings, text="Simulation duration [s]", width=150, height=35)
         
         numValidator = self.app.register(CheckIfNumber)
         positiveNumValidator = self.app.register(CheckIfPositiveNumber)
         
-        in_mass = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mass, validate="key", validatecommand=(positiveNumValidator, "%P"))
-        in_mi = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mi, validate="key", validatecommand=(numValidator, "%P"))
-        in_k = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.k, validate="key", validatecommand=(numValidator, "%P"))
-        in_position = ctk.CTkEntry(master=self.frameSettings, textvariable=self.position, width=150, validate="key", validatecommand=(numValidator, "%P"))
-        in_velocity = ctk.CTkEntry(master=self.frameSettings, textvariable=self.velocity, width=150, validate="key", validatecommand=(numValidator, "%P"))
+        in_mass = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mass, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
+        in_mi = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.mi, validate="key", validatecommand=(numValidator, "%P"), justify="right")
+        in_k = ctk.CTkEntry(master=self.frameSettings, width=150, textvariable=self.k, validate="key", validatecommand=(numValidator, "%P"), justify="right")
+        in_position = ctk.CTkEntry(master=self.frameSettings, textvariable=self.position, width=150, validate="key", validatecommand=(numValidator, "%P"), justify="right")
+        in_velocity = ctk.CTkEntry(master=self.frameSettings, textvariable=self.velocity, width=150, validate="key", validatecommand=(numValidator, "%P"), justify="right")
         
-        in_numDomain = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.domain, validate="key", validatecommand=(positiveNumValidator, "%P"))
-        in_numBounds = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.bounds, validate="key", validatecommand=(positiveNumValidator, "%P"))
-        in_numTest = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.tests, validate="key", validatecommand=(positiveNumValidator, "%P"))
-        in_numEpochs = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.epochs, validate="key", validatecommand=(positiveNumValidator, "%P"))
+        in_numDomain = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.domain, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
+        in_numBounds = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.bounds, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
+        in_numTest = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.tests, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
+        in_numEpochs = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.epochs, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
+        in_time = ctk.CTkEntry(master=self.frameTrainingSettings, width=150, textvariable=self.time, validate="key", validatecommand=(positiveNumValidator, "%P"), justify="right")
         
         in_numDomain.insert(tk.END, "100")
         in_numBounds.insert(tk.END, "20")
         in_numTest.insert(tk.END, "200")
         in_numEpochs.insert(tk.END, "5000")
+        in_time.insert(tk.END, "10")
         
+        btn_playSimulation = ctk.CTkButton(master=self.frameSimulation, text="Play")
+        btn_playSimulation.configure(command=lambda x=btn_playSimulation:self.ReplaySimulationThread(x, self.latestPred))
         btn_begin = ctk.CTkButton(master=self.frameSettings, text="Start")
-        btn_begin.configure(command=lambda x=btn_begin:self.StartSimulation(x))
+        btn_begin.configure(command=lambda x=btn_begin, y=btn_playSimulation:self.StartSimulation(x,y))
         btn_swapSettings = ctk.CTkButton(master=self.frameTrainingSettings,text="", image=SettingsPhoto, command=ShowSettings, width=15, height=15).place(x=10,y=10)
         btn_swapTrainSettings = ctk.CTkButton(master=self.frameSettings,text="", image=SettingsPhoto, command=HideSettings, width=15, height=15).place(x=10,y=10)
         
+        
+        self.DrawSimulation(btn_playSimulation)
+        #btn_playSimulation.configure(state=tk.DISABLED)
         
         # -- PLACEMENT -- 
         
@@ -384,6 +412,8 @@ class GUI:
         btn_begin.grid(row=13, column=0)
  
             # -- FrameTrainSettings -- 
+            
+        l_titleModelSettings.grid(row=0, column=0)
  
         l_numDomain.grid(row=2, column=0)
         in_numDomain.grid(row=3, column=0)
@@ -397,9 +427,14 @@ class GUI:
         l_numEpochs.grid(row=8, column=0)
         in_numEpochs.grid(row=9, column=0)
         
+        l_time.grid(row=10, column=0)
+        in_time.grid(row=11, column=0)
+        
             # -- FrameSimulation --
         
         l_titleSimulation.grid(row=0, column=0)
+        
+        btn_playSimulation.grid(row=15, column=0)
         
             # -- FrameGraph --
         
