@@ -1,4 +1,3 @@
-from turtle import width
 import deepxde as dde
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,10 +71,6 @@ class PINN:
     def TrainModel(self, numDomain, numBoundary, numTest, layers, numEpoch):
         # Egzaktno resenje
         def func(t):
-            #print("sssssssssssss ", delta, w0)
-            
-            # delta = Mi / 2*mass - NIJE DEO KODA
-            # w0 = np.sqrt(k / mass) - NIJE DEO KODA
             # Postoje 3 slucaja za dobijanje egzaktnog resenja koji potencijalno sadrze svoje podslucajeve:
             
             
@@ -196,6 +191,7 @@ class GUI:
         self.tests = tk.StringVar()
         self.epochs = tk.StringVar()
         self.time = tk.StringVar()
+        self.preset = tk.StringVar()
         
         self.latestPred = [(0,0)]
         
@@ -203,6 +199,8 @@ class GUI:
         self.frameSimulation = ctk.CTkFrame(self.app, width=400, height=700)
         self.frameGraph = ctk.CTkFrame(self.app, width=440, height=700)
         self.frameTrainingSettings = ctk.CTkFrame(self.app, height=700)
+        
+        self.presetOptions = ["Overdamped", "Critically dampded", "Underdamped", "Custom"]
         
     def DrawGraph(self, data):
         figure1 = plt.Figure(figsize=(9,5), dpi=90)
@@ -305,6 +303,27 @@ class GUI:
             
         def ShowSettings():
             self.frameSettings.tkraise()
+            
+        def PresetChange(choice):
+            if(choice == "Overdamped"):
+                self.mass.set(0.2)
+                self.mi.set(10)
+                self.k.set(0.01)
+            elif(choice == "Critically dampded"):
+                self.mass.set(1)
+                self.mi.set(2)
+                self.k.set(1)
+            elif(choice == "Underdamped"):
+                self.mass.set(1)
+                self.mi.set(0.5)
+                self.k.set(1)
+            
+            if(choice != "Custom"):
+                self.position.set(0)
+                self.velocity.set(-2)
+            else:
+                pass
+            
         
         # -- FRAME SETTINGS --
         
@@ -349,6 +368,7 @@ class GUI:
         l_titleSimulation = ctk.CTkLabel(master=self.frameSimulation, text="SIMULATION", width=150, height=35)
         l_titleGraph = ctk.CTkLabel(self.frameGraph, text="GRAPH", width=150, height=35)
         l_titleModelSettings = ctk.CTkLabel(master=self.frameTrainingSettings, text="PINN PARAMETERS", width=150, height=35)
+        l_preset = ctk.CTkLabel(master=self.frameSettings, text="Presets", width=150, height=35)
         
         l_numDomain = ctk.CTkLabel(self.frameTrainingSettings, text="Domain points", width=150, height=35)
         l_numBounds = ctk.CTkLabel(self.frameTrainingSettings, text="Boundary points", width=150, height=35)
@@ -384,6 +404,10 @@ class GUI:
         btn_swapSettings = ctk.CTkButton(master=self.frameTrainingSettings,text="", image=SettingsPhoto, command=ShowSettings, width=15, height=15).place(x=10,y=10)
         btn_swapTrainSettings = ctk.CTkButton(master=self.frameSettings,text="", image=SettingsPhoto, command=HideSettings, width=15, height=15).place(x=10,y=10)
         
+        dm_presets = ctk.CTkOptionMenu(self.frameSettings, values=self.presetOptions, command=PresetChange, variable=self.preset)
+        self.preset.set(self.presetOptions[0])
+        PresetChange(self.preset.get())
+        
         
         self.DrawSimulation(btn_playSimulation)
         #btn_playSimulation.configure(state=tk.DISABLED)
@@ -394,20 +418,23 @@ class GUI:
         
         l_titleSettings.grid(row=0, column=0)
         
-        l_mass.grid(row=2, column=0)
-        in_mass.grid(row=3, column=0)
+        l_preset.grid(row=1,column=0)
+        dm_presets.grid(row=2,column=0)
         
-        l_mi.grid(row=4, column=0)
-        in_mi.grid(row=5, column=0)
+        l_mass.grid(row=3, column=0)
+        in_mass.grid(row=4, column=0)
         
-        l_k.grid(row=6, column=0)
-        in_k.grid(row=7, column=0)
+        l_mi.grid(row=5, column=0)
+        in_mi.grid(row=6, column=0)
         
-        l_position.grid(row=8, column=0)
-        in_position.grid(row=9, column=0)
+        l_k.grid(row=7, column=0)
+        in_k.grid(row=8, column=0)
+        
+        l_position.grid(row=9, column=0)
+        in_position.grid(row=10, column=0)
 
-        l_velocity.grid(row=10, column=0)
-        in_velocity.grid(row=11, column=0)
+        l_velocity.grid(row=11, column=0)
+        in_velocity.grid(row=12, column=0)
         
         btn_begin.grid(row=13, column=0)
  
