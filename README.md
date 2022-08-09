@@ -5,12 +5,10 @@ Dependency:
 - deepxde
 - numpy
 - tensorflow
-- matplotlib
-- threading
-- os
-- tkinter
+- matplotlib 
+- tk
 - customtkinter
-- PIL
+- pillow
 	
 Pokretanje:
 1. Pokrenuti "oscilator.py" skriptu
