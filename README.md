@@ -4,6 +4,7 @@ Za diplomski
 Dependency:
 - deepxde
 - numpy
+- tensorflow
 - matplotlib
 - threading
 - os
