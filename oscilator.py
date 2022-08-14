@@ -5,7 +5,10 @@ import threading, os
 import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import time
+
+
 
 
 # Diferencijalna jednacina i njeni parametri
@@ -22,9 +25,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 # Testni slucajevi
 # delta > w0
 
-# mass = 0.2
-# Mi = 10
-# k = 0.01
+# mass = 1
+# Mi = 3
+# k = 1
 
 # detla == w0
 
@@ -71,6 +74,7 @@ class PINN:
     def TrainModel(self, numDomain, numBoundary, numTest, layers, numEpoch):
         # Egzaktno resenje
         def func(t):
+            print(f"Delta: {self.delta} | W0: {self.w0}")
             # Postoje 3 slucaja za dobijanje egzaktnog resenja koji potencijalno sadrze svoje podslucajeve:
             
             
@@ -100,7 +104,8 @@ class PINN:
                 if(self.delta == 0 and self.v0 == 0): # Harmonijske
                     A = -self.x0 / 2
                     fi = (2 * np.pi * n) + np.pi
-                elif(self.delta != 0):       # Neprigusene oscilacije
+                else:
+                #elif(self.delta != 0):       # Neprigusene oscilacije
                     A = -self.v0 / (2 * self.delta)
                     fi = (2 * np.pi * n) + np.pi
                 
@@ -144,7 +149,7 @@ class PINN:
         
         bestRMSE = float("inf")
         
-        for i in range(1):
+        for i in range(5):
             # Trening podaci
             data = dde.data.TimePDE(self.interval, Ode, [ic1, ic2], numDomain, numBoundary, solution=func, num_test=numTest)
 
@@ -154,7 +159,7 @@ class PINN:
             
             losshistory, train_state = model.train(epochs=numEpoch, callbacks=[])
             
-            rmse = np.sqrt(np.sum((train_state.y_test - train_state.best_y)**2))
+            rmse = np.sqrt((1/len(train_state.y_test)) * np.sum((train_state.y_test - train_state.best_y)**2))
             
             if(i == 0):
                 bestRMSE = rmse
@@ -168,7 +173,7 @@ class PINN:
             
             #print(f"{i+1} RMSE: {np.sqrt(np.sum((train_state.y_test - train_state.best_y)**2))}")
         
-        #print(f"BEST RMSE: {bestRMSE}") 
+        print(f"BEST RMSE: {bestRMSE}") 
         return bestHist, bestTrain
 
 # GUI klasa
@@ -200,13 +205,19 @@ class GUI:
         self.frameGraph = ctk.CTkFrame(self.app, width=440, height=700)
         self.frameTrainingSettings = ctk.CTkFrame(self.app, height=700)
         
+        # Helper
         self.presetOptions = ["Overdamped", "Critically dampded", "Underdamped", "Custom"]
+        
+        figure1 = plt.Figure(figsize=(9,5), dpi=90)
+        self.graph = FigureCanvasTkAgg(figure1, self.frameGraph)
+        
+        self.progressbar = tk.ttk.Progressbar(master=self.frameGraph, mode='indeterminate', length=200)
         
     def DrawGraph(self, data):
         figure1 = plt.Figure(figsize=(9,5), dpi=90)
         ax1 = figure1.add_subplot(111)
-        plot = FigureCanvasTkAgg(figure1, self.frameGraph)
-        plot.get_tk_widget().grid(row=1, column=0, rowspan=14)
+        self.graph = FigureCanvasTkAgg(figure1, self.frameGraph)
+        self.graph.get_tk_widget().grid(row=1, column=0, rowspan=14)
         ax1.plot([x[0] for x in data], [x[1] for x in data])
         ax1.set_title('Prediction')
         ax1.set_xlabel("Time [s]")
@@ -238,27 +249,33 @@ class GUI:
         spring = canvas.create_line(200,50,200,massHeightPos)        # spring
         
         for x in data:
-            canvas.delete(massBlock)
             canvas.delete(spring)
             
             massHeightPos = 200 - 50 * x[1]
-            massBlock = canvas.create_polygon(150,massHeightPos,250,massHeightPos, 250,massHeightPos+100,150,massHeightPos+100)     # mass block
+            spring = canvas.create_line(200,50,200,massHeightPos)
+            canvas.moveto(massBlock, 150, massHeightPos)
             
-            spring = canvas.create_line(200,50,200,massHeightPos)        # spring
+            prev = x[1]
+            self.frameSimulation.update()
+            time.sleep(0.005)
             
-            canvas.after(5)
         
         playButton.configure(state=tk.NORMAL)
         
+        
     def StartTrainingThread(self, startButton, playButton):
         
+        layers = [1] + [30] * 2 + [1]
         pinn = PINN(float(self.mass.get()), float(self.mi.get()), float(self.k.get()), float(self.position.get()), float(self.velocity.get()), float(self.time.get()))
-        losshistory, train_state = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()),  [1] + [30] * 2 + [1], int(self.epochs.get()))
+        losshistory, train_state = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()), layers , int(self.epochs.get()))
         #dde.saveplot(losshistory, train_state, issave=True, isplot=True)
         
         pred = pinn.PackData(train_state.X_test, train_state.best_y)
         pred = sorted(pred, key=lambda x: x[0])
 
+        self.progressbar.stop()
+        self.progressbar.grid_forget()
+        
         self.DrawGraph(pred)
         
         self.latestPred = pred
@@ -272,6 +289,11 @@ class GUI:
         
     def StartSimulation(self, startButton, playButton):
         startButton.configure(state=tk.DISABLED)
+        self.graph.get_tk_widget().grid_forget()
+        
+        self.progressbar.start()
+        self.progressbar.grid(row=1, column=0, rowspan=14)
+        
         thread = threading.Thread(target=self.StartTrainingThread, args=(startButton, playButton,))
         thread.start()
         
@@ -306,9 +328,9 @@ class GUI:
             
         def PresetChange(choice):
             if(choice == "Overdamped"):
-                self.mass.set(0.2)
-                self.mi.set(10)
-                self.k.set(0.01)
+                self.mass.set(1)
+                self.mi.set(3)
+                self.k.set(1)
             elif(choice == "Critically dampded"):
                 self.mass.set(1)
                 self.mi.set(2)
@@ -321,9 +343,9 @@ class GUI:
             if(choice != "Custom"):
                 self.position.set(0)
                 self.velocity.set(-2)
-            else:
-                pass
             
+        def ParamChangePreset():
+            self.preset.set(self.presetOptions[-1])
         
         # -- FRAME SETTINGS --
         
@@ -351,7 +373,7 @@ class GUI:
         
         # -- WIDGETS -- 
         
-        imagePath = os.path.join("Resources", "SettingsButtonImg.png")
+        imagePath = os.path.join("Resources", "settingsButtonImg.png")
         image = Image.open(imagePath).resize((15,15), Image.ANTIALIAS)
         SettingsPhoto = ImageTk.PhotoImage(image)
         
@@ -372,7 +394,7 @@ class GUI:
         
         l_numDomain = ctk.CTkLabel(self.frameTrainingSettings, text="Domain points", width=150, height=35)
         l_numBounds = ctk.CTkLabel(self.frameTrainingSettings, text="Boundary points", width=150, height=35)
-        l_numTest = ctk.CTkLabel(self.frameTrainingSettings, text="Number of tests", width=150, height=35)
+        l_numTest = ctk.CTkLabel(self.frameTrainingSettings, text="Test points", width=150, height=35)
         l_numEpochs = ctk.CTkLabel(self.frameTrainingSettings, text="Number of epochs", width=150, height=35)
         l_time = ctk.CTkLabel(self.frameTrainingSettings, text="Simulation duration [s]", width=150, height=35)
         
@@ -399,7 +421,7 @@ class GUI:
         
         btn_playSimulation = ctk.CTkButton(master=self.frameSimulation, text="Play")
         btn_playSimulation.configure(command=lambda x=btn_playSimulation:self.ReplaySimulationThread(x, self.latestPred))
-        btn_begin = ctk.CTkButton(master=self.frameSettings, text="Start")
+        btn_begin = ctk.CTkButton(master=self.frameSettings, text="Train PINN")
         btn_begin.configure(command=lambda x=btn_begin, y=btn_playSimulation:self.StartSimulation(x,y))
         btn_swapSettings = ctk.CTkButton(master=self.frameTrainingSettings,text="", image=SettingsPhoto, command=ShowSettings, width=15, height=15).place(x=10,y=10)
         btn_swapTrainSettings = ctk.CTkButton(master=self.frameSettings,text="", image=SettingsPhoto, command=HideSettings, width=15, height=15).place(x=10,y=10)
@@ -407,7 +429,6 @@ class GUI:
         dm_presets = ctk.CTkOptionMenu(self.frameSettings, values=self.presetOptions, command=PresetChange, variable=self.preset)
         self.preset.set(self.presetOptions[0])
         PresetChange(self.preset.get())
-        
         
         self.DrawSimulation(btn_playSimulation)
         #btn_playSimulation.configure(state=tk.DISABLED)
