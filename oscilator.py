@@ -8,6 +8,8 @@ from PIL import Image, ImageTk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 
+import pandas as pd
+
 
 
 
@@ -174,7 +176,7 @@ class PINN:
             #print(f"{i+1} RMSE: {np.sqrt(np.sum((train_state.y_test - train_state.best_y)**2))}")
         
         print(f"BEST RMSE: {bestRMSE}") 
-        return bestHist, bestTrain
+        return bestHist, bestTrain, bestRMSE
 
 # GUI klasa
 
@@ -205,6 +207,7 @@ class GUI:
         self.frameGraph = ctk.CTkFrame(self.app, width=440, height=700)
         self.frameTrainingSettings = ctk.CTkFrame(self.app, height=700)
         
+        self.l_rmse = ctk.CTkLabel(master=self.frameGraph, text="RMSE [m]: /", width=150, height=35)
         # Helper
         self.presetOptions = ["Overdamped", "Critically dampded", "Underdamped", "Custom"]
         
@@ -217,11 +220,11 @@ class GUI:
         figure1 = plt.Figure(figsize=(9,5), dpi=90)
         ax1 = figure1.add_subplot(111)
         self.graph = FigureCanvasTkAgg(figure1, self.frameGraph)
-        self.graph.get_tk_widget().grid(row=1, column=0, rowspan=14)
+        self.graph.get_tk_widget().grid(row=2, column=0, rowspan=13)
         ax1.plot([x[0] for x in data], [x[1] for x in data])
         ax1.set_title('Prediction')
         ax1.set_xlabel("Time [s]")
-        ax1.set_ylabel("Distance [cm]")
+        ax1.set_ylabel("Distance [m]")
         
     def DrawSimulation(self, playButton, data=[(0,0)]):
         playButton.configure(state=tk.DISABLED)
@@ -267,15 +270,25 @@ class GUI:
         
         layers = [1] + [30] * 2 + [1]
         pinn = PINN(float(self.mass.get()), float(self.mi.get()), float(self.k.get()), float(self.position.get()), float(self.velocity.get()), float(self.time.get()))
-        losshistory, train_state = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()), layers , int(self.epochs.get()))
+        losshistory, train_state, rmse = pinn.TrainModel(int(self.domain.get()), int(self.bounds.get()), int(self.tests.get()), layers , int(self.epochs.get()))
         #dde.saveplot(losshistory, train_state, issave=True, isplot=True)
         
         pred = pinn.PackData(train_state.X_test, train_state.best_y)
         pred = sorted(pred, key=lambda x: x[0])
 
+        ###### TEMP
+        
+        # temp = {"t" : [x[0] for x in pred], "y": [x[1] for x in pred]}
+        # df = pd.DataFrame(temp)
+        # df.to_csv("Result_pinn_under.csv")
+        
+        ########
+
         self.progressbar.stop()
         self.progressbar.grid_forget()
         
+        self.l_rmse.config(text = f"RMSE [m]: {rmse} ")
+        self.l_rmse.grid(row=1, column=0)
         self.DrawGraph(pred)
         
         self.latestPred = pred
